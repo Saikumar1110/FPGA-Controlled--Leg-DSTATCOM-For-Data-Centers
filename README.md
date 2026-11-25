@@ -1,16 +1,36 @@
 # FPGA-Controlled--Leg-DSTATCOM-For-Data-Centers
 
-Problem. Single-phase nonlinear loads produce triplen harmonics that add in phase in a three-phase four-wire system and return through the neutral, where they can overload it. Uncompensated, the nonlinear case gives a source-current THD of 27.24 %.
-Compensator. A DSTATCOM built from three single-phase VSC H-bridges, each connected to one phase through a transformer, is modelled in MATLAB Simulink with SRF control. The system is 415 V, 50 Hz, four-wire, with a line impedance of 5 mH and 0.75 Ω per phase.
-Why a Kalman filter. The reference current is built from the harmonic components of the load current. A Kalman filter estimates the in-phase and quadrature components of the fundamental and selected odd harmonics directly from the measured current. It needs no phase-locked loop, so it avoids the PLL delay and its sensitivity to supply distortion. Its prediction step can offset the processing delay.
-Filter model. The state $x_k$ holds the harmonic components and the measurement $z_k$ is the sampled load current:
-$$x_{k+1} = \Phi x_k + w_k, \qquad z_k = H x_k + v_k$$
-Filter equations. Each sample runs one time update and one measurement update:
-$$\hat{x}_k^{-} = \Phi \hat{x}_{k-1}, \qquad P_k^{-} = \Phi P_{k-1}\Phi^{T} + Q$$
-$$K_k = P_k^{-}H^{T}\left(HP_k^{-}H^{T} + R\right)^{-1}, \qquad \hat{x}_k = \hat{x}_k^{-} + K_k\left(z_k - H\hat{x}_k^{-}\right), \qquad P_k = (I - K_k H)P_k^{-}$$
-The number of states is set by the harmonics to be compensated. The noise covariances $Q$ and $R$ are tuned, and convergence depends on the initial covariance.
-Fixed-point format. The arithmetic uses signed Q15.16: a 32-bit word with 16 fractional bits, resolution $2^{-16} \approx 1.5 \times 10^{-5}$. Adders and subtractors saturate on overflow. The multiplier forms a 64-bit product and shifts it right by 16 bits to return to Q15.16.
-Verilog building blocks. The adder, subtractor and multiplier are the first blocks of the Verilog design, and they are currently being written. Each block will be checked against the MATLAB double-precision result on a set of test vectors, and the maximum error and pipeline latency will be recorded.
-Pipelining. The planned design pipelines the multiplier and the multiply-accumulate chain, so that a new operand can enter every clock cycle once the pipeline is full. The latency will be counted in clock cycles, so the timing budget is known exactly.
-Parallel matrix processing. The matrix products and the inversion in the gain step are the expensive part. The plan is a folded, systolic-style array of multiply-add nodes, following the Fadeev approach reported by Mills et al. The update cost is modelled as $k = [D_{ma}(2(n^2-1)) + D_{ma}(2n-2)]K_s + D_d$ clock cycles, with $t_{update} = k / f_{clk}$. The DSP-block budget is $n_{dsp}(2n-1) \le N_{dsp}$. With four DSP blocks per node this gives about 30 states on the XC7A100T and about 15 on the XC7A50T. These are estimates until the synthesis report is available.
-Target and verification. The target is a Digilent Nexys 7 board (Artix-7, 100 MHz clock). The verified design will be synthesised and programmed onto the board, and the timing and resource reports will show whether one update fits within one sampling period. The Kalman filter will also be compared with the SRF reference generator under load steps and distorted supply voltage.
+FPGA-BASED REAL-TIME KALMAN FILTER STATE ESTIMATION AND CONTROL OF DSTATCOM
+Summary
+1. Nonlinear loads and the neutral problem.
+Single-phase nonlinear loads, such as rectifiers in computers and chargers, produce triplen harmonics (3rd, 9th, 15th). These harmonics are in phase in all three phases, so they add up instead of cancelling and flow back through the neutral conductor, which can overload it.
+
+2. The DSTATCOM as the remedy.
+A DSTATCOM is a shunt converter connected at the point of common coupling. It injects a compensating current that cancels the harmonics, supplies reactive power, balances the load and handles the neutral current. This project uses three single-phase H-bridge converters, each connected to one phase through a transformer, and controls them with the synchronous reference frame method.
+
+3. The reference current is the critical part.
+The quality of compensation depends on how accurately the reference current is generated. The conventional SRF method gets its reference frame from a phase-locked loop. That loop is sensitive to distortion in the supply voltage, and it adds delay, which makes compensation lag the load.
+
+4. What a Kalman filter does.
+A Kalman filter is a recursive estimator. It combines a model of the signal with each new noisy measurement to produce the best estimate of the hidden quantities. Here, the hidden quantities are the in-phase and quadrature components of the fundamental and the odd harmonics of the load current. Once they are known, the reference current can be built directly from them.
+
+5. Predict and correct.
+At each sample, the filter first predicts the next state using its model, then corrects that prediction with the new measurement. The correction is weighted by the Kalman gain, which balances how much the filter trusts its model against how much it trusts the measurement. The noise levels assumed for the model and the measurement are set by tuning, and the filter's behaviour depends on them.
+
+6. Why no PLL is needed.
+The phase information is carried inside the state of the filter. The filter therefore does not need a separate synchronising loop, which removes the PLL's delay and its sensitivity to distorted voltage. Because the filter can also predict ahead, the delay from sampling and processing can be compensated.
+
+7. Fixed-point arithmetic on the FPGA.
+Floating-point arithmetic is expensive in FPGA logic, so the filter uses fixed-point numbers. The chosen format is Q15.16, a 32-bit word with 16 fractional bits, which gives a resolution of about 1.5 x 10^-5. Addition and subtraction saturate when they overflow. Multiplication uses a wider intermediate product, which is then scaled back to the same format.
+
+8. Verilog building blocks.
+The design starts with an adder, a subtractor and a multiplier. Each one is checked against the double-precision MATLAB result on a set of test inputs, and the maximum error is recorded. These blocks are the foundation for the matrix operations of the filter.
+
+9. Pipelining and parallel processing.
+A DSP processor runs operations one after another, so the whole filter update takes most of the sampling period. An FPGA can instead run many operations at once, and pipelining splits each operation into stages so that a new input can enter on every clock cycle once the pipeline is full. The matrix products and the matrix inversion are the most costly steps, so the plan is a folded, systolic-style array that reuses multiply-add units. The trade-off is that more parallelism uses more logic and DSP blocks, and the number of available DSP blocks limits how many states the filter can have.
+
+10. Target and verification.
+The design will be implemented on a Digilent Nexys 7 board, which has an Artix-7 FPGA and a 100 MHz clock. The timing and resource reports will show whether one filter update fits within one sampling period. The Kalman reference will then be compared with the SRF method under load steps and distorted supply voltage, and the speed, power and reliability of the FPGA design will be reported together.
+
+
+
