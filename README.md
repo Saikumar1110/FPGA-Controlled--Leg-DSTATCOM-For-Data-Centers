@@ -1,6 +1,4 @@
-# FPGA-Controlled--Leg-DSTATCOM-For-Data-Centers
-
-FPGA-BASED REAL-TIME KALMAN FILTER STATE ESTIMATION AND CONTROL OF DSTATCOM
+## FPGA-BASED REAL-TIME KALMAN FILTER STATE ESTIMATION AND CONTROL OF DSTATCOM
 Summary
 1. Nonlinear loads and the neutral problem.
 Single-phase nonlinear loads, such as rectifiers in computers and chargers, produce triplen harmonics (3rd, 9th, 15th). These harmonics are in phase in all three phases, so they add up instead of cancelling and flow back through the neutral conductor, which can overload it.
